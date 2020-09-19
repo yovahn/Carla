@@ -1,0 +1,120 @@
+#!/usr/bin/env python
+"""
+09/17/2020 - Loaded car into opendrive CulDeSac map (http://www.opendrive.org/). 
+Note, xdor file should be in /PythonAPI/util/opendrive
+TODO: Attached camera isn't displaying via opencv
+"""
+
+
+import glob
+import os
+import sys
+
+try:
+    sys.path.append(glob.glob('../carla/dist/carla-*%d.%d-%s.egg' % (
+        sys.version_info.major,
+        sys.version_info.minor,
+        'win-amd64' if os.name == 'nt' else 'linux-x86_64'))[0])
+except IndexError:
+    pass
+
+import carla
+
+import random
+import time
+import numpy as np
+import cv2
+IM_WIDTH = 640
+IM_HEIGHT = 480
+xodr_path = "../util/opendrive/CulDeSac.xodr"
+
+def process_img(image):
+    """
+    transform flattened rgba array into h x w x 3 matrix and display
+    """
+    i = np.array(image.raw_data)
+    i2 = i.reshape((IM_HEIGHT, IM_WIDTH, 4))
+    i3 = i2[:, :, :3]
+    cv2.imshow("", i3)
+    cv2.waitKey(0)
+    return i3/255.0
+
+
+def main():
+    actor_list = []
+
+    # In this tutorial script, we are going to add a vehicle to the simulation
+    # and let it drive in autopilot. We will also create a camera attached to
+
+    try:
+        # First we need to crreate the client that will send the requests to the simulator.
+        
+        client = carla.Client('localhost', 2000)
+        client.set_timeout(2.0)
+        
+        # Load map from OpenDrive
+        if os.path.exists(xodr_path):
+            with open(xodr_path) as od_file:
+                try:
+                    data = od_file.read()
+                except OSError:
+                    print('file could not be read.')
+                    sys.exit()
+            print('load opendrive map %r.' % os.path.basename(xodr_path))
+            vertex_distance = 2.0  # in meters
+            max_road_length = 50.0 # in meters
+            wall_height = 1.0      # in meters
+            extra_width = 0.6      # in meters
+            world = client.generate_opendrive_world(
+                data, carla.OpendriveGenerationParameters(
+                    vertex_distance=vertex_distance,
+                    max_road_length=max_road_length,
+                    wall_height=wall_height,
+                    additional_width=extra_width,
+                    smooth_junctions=True,
+                    enable_mesh_visibility=True))
+        else:
+          print("xodr path DNE")
+          # retrieve current world
+          world = client.get_world()
+
+        # world contains the list of blueprints that we can use for adding new actors
+        blueprint_library = world.get_blueprint_library()
+
+        # filter out all the blueprints of type 'vehicle' 
+        vehicle_bp = random.choice(blueprint_library.filter('vehicle.bmw.*'))
+        vehicle_bp.set_attribute('color', '255, 0, 255')
+
+        # spawn points are points unobstructed by terrain
+        spawn_point =  random.choice(world.get_map().get_spawn_points())
+        my_vehicle = world.spawn_actor(vehicle_bp, spawn_point)
+
+        # vehicle controls
+        my_vehicle.set_autopilot(True)
+        #my_vehicle.apply_control(carla.VehicleControl(throttle=1.0, steer=0.0))
+        actor_list.append(my_vehicle)
+
+        # Spawn and attach rgb sensor to vehicle
+        camera_bp = blueprint_library.find("sensor.camera.rgb")
+        camera_bp.set_attribute("image_size_x", "640")
+        camera_bp.set_attribute("image_size_y", "480")
+        actor_list.append(camera)
+
+
+        spawn_point = carla.Transform(carla.Location(x=2.5, z=0.7))
+        camera = world.spawn_actor(camera_bp, spawn_point, attach_to=my_vehicle)
+        
+
+        camera.listen(lambda data: process_img(data))
+        time.sleep(15)
+
+    finally:
+        # actors created in a world must always be desroyed
+        for actor in actor_list:
+            actor.destroy()
+            print("done")
+        # pass
+
+
+if __name__ == '__main__':
+    main()
